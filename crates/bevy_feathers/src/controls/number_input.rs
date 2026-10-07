@@ -494,7 +494,8 @@ fn number_input_on_insert_value(
             .resolve(units)
             .format(clamped_value, drag_state.mode == EditMode::Editing);
         if editable_text.value() != &new_digits {
-            editable_text.queue_edit(TextEdit::SelectAll);
+            // `SelectAll` selects nothing before the text is laid out, so clear instead.
+            editable_text.clear();
             editable_text.queue_edit(TextEdit::Insert(new_digits.into()));
         }
 
@@ -615,7 +616,7 @@ fn number_input_init(
             .format(*input_value, drag_state.mode == EditMode::Editing);
         let old_digits = editable_text.value().to_string();
         if old_digits != new_digits {
-            editable_text.queue_edit(TextEdit::SelectAll);
+            editable_text.clear();
             editable_text.queue_edit(TextEdit::Insert(new_digits.into()));
         }
 
