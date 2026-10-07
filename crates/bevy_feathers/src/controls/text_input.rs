@@ -2,12 +2,16 @@ use bevy_app::{Plugin, PreUpdate, PropagateOver};
 use bevy_ecs::{
     change_detection::DetectChanges,
     entity::Entity,
+    event::EntityEvent,
+    hierarchy::Children,
     lifecycle::RemovedComponents,
+    observer::On,
     query::{Added, Has, With},
     reflect::ReflectComponent,
     schedule::IntoScheduleConfigs,
-    system::{Commands, Query, Res},
+    system::{Commands, Query, Res, ResMut},
 };
+use bevy_input_focus::{AcquireFocus, FocusCause, InputFocus};
 use bevy_picking::{cursor::EntityCursor, PickingSystems};
 use bevy_reflect::std_traits::ReflectDefault;
 use bevy_reflect::Reflect;
@@ -58,6 +62,7 @@ impl FeathersTextInputContainer {
             }
             FeathersTextInputContainer
             FocusWithinIndicator
+            on(text_input_container_on_acquire_focus)
             ThemeBackgroundColor(tokens::TEXT_INPUT_BG)
             InheritableThemeTextColor(tokens::TEXT_INPUT_TEXT)
             InheritableFont {
@@ -66,6 +71,26 @@ impl FeathersTextInputContainer {
                 weight: FontWeight::NORMAL,
             }
         }
+    }
+}
+
+/// Presses on the container's padding, or on a label inside it, bubble up to here. Focus the
+/// text input instead of letting the request clear focus at the window.
+fn text_input_container_on_acquire_focus(
+    mut acquire_focus: On<AcquireFocus>,
+    q_children: Query<&Children>,
+    q_text_input: Query<(), With<FeathersTextInput>>,
+    mut focus: ResMut<InputFocus>,
+) {
+    let Some(text_input) = q_children
+        .iter_descendants(acquire_focus.event_target())
+        .find(|e| q_text_input.contains(*e))
+    else {
+        return;
+    };
+    acquire_focus.propagate(false);
+    if focus.get() != Some(text_input) {
+        focus.set(text_input, FocusCause::Navigated);
     }
 }
 
