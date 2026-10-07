@@ -15,7 +15,7 @@ use bevy_ecs::{
     message::MessageCursor,
     query::QueryBuilder,
     reflect::{AppTypeRegistry, ReflectComponent, ReflectEvent, ReflectMessage, ReflectResource},
-    resource::Resource,
+    resource::{IsResource, Resource},
     schedule::Schedules,
     system::{In, Local},
     world::{DeferredWorld, EntityRef, EntityWorldMut, FilteredEntityRef, Mut, World},
@@ -1254,7 +1254,7 @@ pub fn process_remote_mutate_components_request(
         .ok_or_else(|| {
             BrpError::component_error(anyhow!("Component `{}` isn't registered", component))
         })?
-        .reflect_mut(world.entity_mut(entity))
+        .reflect_mut(get_entity_mut(world, entity)?)
         .ok_or_else(|| {
             BrpError::component_error(anyhow!("Cannot reflect component `{}`", component))
         })?;
@@ -1312,7 +1312,7 @@ pub fn process_remote_mutate_resources_request(
 
     // Get the actual resource value from the world as a `dyn Reflect`.
     let mut reflected_component = reflect_component
-        .reflect_mut(world.entity_mut(entity))
+        .reflect_mut(get_entity_mut(world, entity)?)
         .ok_or(BrpError::resource_not_present(&resource_path))?;
 
     // Get the type registration for the field with the given path.
@@ -1401,7 +1401,14 @@ pub fn process_remote_despawn_entity_request(
 ) -> BrpResult {
     let BrpDespawnEntityParams { entity } = parse_some(params)?;
 
-    get_entity_mut(world, entity)?.despawn();
+    let entity_mut = get_entity_mut(world, entity)?;
+    // Despawning a resource's entity leaves `ResourceEntities` pointing at a dead entity.
+    if entity_mut.contains::<IsResource>() {
+        return Err(BrpError::resource_error(format!(
+            "Entity {entity} holds a resource and cannot be despawned"
+        )));
+    }
+    entity_mut.despawn();
 
     Ok(Value::Null)
 }
@@ -2246,6 +2253,51 @@ mod tests {
         world.insert_resource(atr);
         let e = world.spawn_empty();
         insert_reflected_components(e, deserialized_components).expect("FAIL");
+    }
+
+    #[test]
+    fn mutate_components_on_missing_entity() {
+        #[derive(Reflect, Component)]
+        #[reflect(Component)]
+        struct Health(u32);
+
+        let atr = AppTypeRegistry::default();
+        atr.write().register::<Health>();
+        let mut world = World::new();
+        world.insert_resource(atr);
+        let entity = world.spawn(Health(1)).id();
+        world.despawn(entity);
+
+        let params = serde_json::to_value(&BrpMutateComponentsParams {
+            entity,
+            component: "bevy_remote::builtin_methods::tests::Health".to_owned(),
+            path: ".0".to_owned(),
+            value: serde_json::json!(5),
+        })
+        .expect("FAIL");
+        let error = process_remote_mutate_components_request(In(Some(params)), &mut world)
+            .expect_err("FAIL");
+        assert_eq!(error.code, error_codes::ENTITY_NOT_FOUND);
+    }
+
+    #[test]
+    fn despawn_resource_entity() {
+        #[derive(Resource)]
+        struct Counter(u32);
+
+        let mut world = World::new();
+        world.insert_resource(Counter(7));
+        let (entity, _) = world
+            .query::<(Entity, &Counter)>()
+            .single(&world)
+            .expect("FAIL");
+
+        let params = serde_json::to_value(&BrpDespawnEntityParams { entity }).expect("FAIL");
+        let error =
+            process_remote_despawn_entity_request(In(Some(params)), &mut world).expect_err("FAIL");
+        assert_eq!(error.code, error_codes::RESOURCE_ERROR);
+        world.flush();
+        assert_eq!(world.resource::<Counter>().0, 7);
     }
 
     #[test]
