@@ -3,7 +3,7 @@ use bevy_ecs::{
     change_detection::DetectChanges,
     entity::Entity,
     lifecycle::RemovedComponents,
-    query::{Added, Has, With},
+    query::{Added, Changed, Has, Or, Spawned, With},
     reflect::ReflectComponent,
     schedule::IntoScheduleConfigs,
     system::{Commands, Query, Res},
@@ -131,18 +131,39 @@ impl FeathersTextInput {
 
 fn update_text_cursor_color(
     mut q_text_input: Query<(&mut TextCursorStyle, Option<&ThemeContext>), With<FeathersTextInput>>,
+    q_new_or_moved: Query<
+        Entity,
+        (
+            With<FeathersTextInput>,
+            Or<(Spawned, Changed<ThemeContext>)>,
+        ),
+    >,
     theme: Res<UiTheme>,
 ) {
     if theme.is_changed() {
         for (mut cursor_style, theme_context) in q_text_input.iter_mut() {
-            let context = theme_context.map(|tc| tc.0).unwrap_or(SurfaceLevel::Base);
-            cursor_style.color = theme.context_color(&tokens::TEXT_INPUT_CURSOR, context);
-            cursor_style.selection_color =
-                theme.context_color(&tokens::TEXT_INPUT_SELECTION, context);
-            cursor_style.unfocused_selection_color =
-                theme.context_color(&tokens::TEXT_INPUT_SELECTION_UNFOCUSED, context);
+            set_text_cursor_colors(&mut cursor_style, theme_context, &theme);
         }
     }
+
+    // Inputs spawned after the theme was set, or whose context changed, are colored here.
+    for entity in q_new_or_moved.iter() {
+        if let Ok((mut cursor_style, theme_context)) = q_text_input.get_mut(entity) {
+            set_text_cursor_colors(&mut cursor_style, theme_context, &theme);
+        }
+    }
+}
+
+fn set_text_cursor_colors(
+    cursor_style: &mut TextCursorStyle,
+    theme_context: Option<&ThemeContext>,
+    theme: &UiTheme,
+) {
+    let context = theme_context.map(|tc| tc.0).unwrap_or(SurfaceLevel::Base);
+    cursor_style.color = theme.context_color(&tokens::TEXT_INPUT_CURSOR, context);
+    cursor_style.selection_color = theme.context_color(&tokens::TEXT_INPUT_SELECTION, context);
+    cursor_style.unfocused_selection_color =
+        theme.context_color(&tokens::TEXT_INPUT_SELECTION_UNFOCUSED, context);
 }
 
 fn update_text_input_styles(
