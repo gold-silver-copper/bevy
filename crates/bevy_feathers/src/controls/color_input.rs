@@ -1301,7 +1301,7 @@ fn update_controls(
     if let Ok(mut editable_text) = q_editable_text.get_mut(refs.hex_input) {
         let hex_value = state.rgb.to_hex();
         if editable_text.value() != hex_value.as_str() {
-            editable_text.queue_edit(TextEdit::SelectAll);
+            editable_text.clear();
             editable_text.queue_edit(TextEdit::Insert(hex_value.into()));
         }
     }
